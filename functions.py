@@ -462,7 +462,8 @@ def PD_threshold_response(init,t_final,p,q,L_I,L_R,alpha,omega,beta,eta,gamma,N)
     t_event = 0 
     event_times = []
     
-    E, I = init[1,2]
+    E = init[1]
+    I = init[2]
         
     while E + I >= 1 and t_event < t_final: #Makes sure the epidemic can still spread when an event occurs
         #Start the solver until the threshold hits

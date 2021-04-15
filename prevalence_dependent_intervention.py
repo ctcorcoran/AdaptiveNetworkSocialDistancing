@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy.integrate import odeint
+# import networkx as nx
 
 from functions import SEIR_pairwise, PD_threshold_response, AIAT
 
@@ -31,7 +32,7 @@ lamb1 = 4
 probs = [0]
 lamb2 = N*lamb1/M
 for k in range(1,N+1):
-   #degrees greater than 230 occur with negligible probability, and this avoids numerical issues
+    #degrees greater than 230 occur with negligible probability, and this avoids numerical issues
     if k > 230:
         probs.append(0)
     else:
@@ -45,6 +46,17 @@ k_0 = (N/M)*(lamb1)**2
 k2_k_0 = ((N/M)**2)*(lamb1**3)*(lamb1+1)
 phi = 1/(lamb1+1)
 
+# ## Other Network Types for Supplementary Material
+# #G = nx.connected_watts_strogatz_graph(N,30,0.3)
+# G = nx.powerlaw_cluster_graph(N,15,0.99)
+
+# degrees = [G.degree(n) for n in G.nodes()]
+# degree_dist = nx.degree_histogram(G).copy()
+
+# k_0 = sum([k*degree_dist[k] for k in range(len(degree_dist))])/N
+# k2_k_0 = sum([k*(k-1)*degree_dist[k] for k in range(len(degree_dist))])/N
+# phi = nx.transitivity(G)
+
 #Epidemiological Parameters
 eta = 1/5 #Rate of infection onset
 gamma = 1/10 #Rate of Recovery
@@ -56,13 +68,13 @@ beta = (-(2*R_0-K)*gamma - gamma*np.sqrt(K**2-4*R_0*K*phi) )/(2*(R_0-K+K*phi))
 # %% SINGLE INFECTION CURVE - Figures 10 and 12
 
 #Intervention Parameters
-p = 0.05
-q = 0.002
+p = 0.25
+q = 0.02
 L_I = 30
 L_H = 0
-L_R = 90
+L_R = 120
 
-years = 25
+years = 3
 t_final = years*365 
 
 #Values of omega* and alpha*
@@ -72,6 +84,10 @@ alpha = np.log((N-1-p*k_0)/(N-1-k_0))/L_R
 #Initial Infectioned and Exposed (need the degrees of two random nodes)
 rand1 = np.random.choice(range(0,N+1),p=probs) 
 rand2 = np.random.choice(range(0,N+1),p=probs) 
+
+# #For other network types
+# rand1 = np.random.choice(degrees) 
+# rand2 = np.random.choice(degrees)
 
 #Initial Condition
 ad_u_0_s = [N-2,1,1,k_0*N-2*(rand1+rand2),rand1,rand2,0,0,0,k_0,k2_k_0,phi] #[S,E,I,SS,SE,SI,EE,EI,II,k,k^2,phi]
@@ -100,7 +116,7 @@ fig, ax = plt.subplots(1,1,figsize=(4,4))
 for t in event_times[:-1]:
     if t < t_end:
         ax.plot([t,t],[0,max(I_s)],color="lightgray",linestyle="dashed")
-ax.plot([0,t_end],[q*N,q*N],color="lightgray",linestyle="dashed")
+#ax.plot([0,t_end],[q*N,q*N],color="lightgray",linestyle="dashed")
 ax.plot(times[:end],I_s[:end],c="orangered",linestyle="dotted",label="I (Static)")
 ax.plot(times[:end],adI_s[:end],c="orangered",label="I (Adaptive)")
 
@@ -142,7 +158,7 @@ for q in q_props:
                 omega = -np.log(p)/I
                 alpha = np.log((N-1-p*k_0)/(N-1-k_0))/R
                 #
-                times, ad_sol_s, event_times, distance_times = PD_threshold_response(ad_u_0_s,t_final,p,q,I,R,alpha,omega,beta,eta,gamma,N)
+                times, ad_sol_s, event_times = PD_threshold_response(ad_u_0_s,t_final,p,q,I,R,alpha,omega,beta,eta,gamma,N)
                 times = np.ndarray.tolist(times)
                 R_temp = [N-ad_sol_s[0,i]-ad_sol_s[1,i]-ad_sol_s[2,i] for i in range(len(times))]
                 temp_final_sizes.append((R_temp[-1]-R_s[-1])/R_s[-1])
@@ -196,11 +212,11 @@ cbar_AIAT = fig_AIAT.colorbar(cm_AIAT, ax=axs_AIAT.ravel().tolist())
 cbar.ax.tick_params(labelsize=30.0)
 cbar_AIAT.ax.tick_params(labelsize=30.0)
 
-#fig.savefig("Figure11.eps")
-#fig_AIAT.savefig("Figure13.eps")
+fig.savefig("Figure11.pdf")
+fig_AIAT.savefig("Figure13.pdf")
 
 ###############################
-# %%  Plots for Figures 14 
+# %%  Plots for Figure 14 
 
 # Defining Parameters
 L_I = [15,30,60] 
@@ -209,7 +225,7 @@ q_props = [0.001*n for n in range(1,31)]
 props = [0.025*n for n in range(1,41)]
 
 #Final Time
-years = 6 
+years = 3 
 t_final = years*365
 
 all_final_sizes = []
@@ -219,12 +235,13 @@ for I in L_I:
     final_sizes = []
     AIATs = []
     for p in props:
+        print(props.index(p))
         temp_final_sizes = []
         temp_AIAT = []
         for q in q_props:
             omega = -np.log(p)/I
             alpha = np.log((N-1-p*k_0)/(N-1-k_0))/L_R
-            times, ad_sol_s, event_times, distance_times = PD_threshold_response(ad_u_0_s,t_final,p,q,L_I,L_R,alpha,omega,beta,eta,gamma,N)
+            times, ad_sol_s, event_times = PD_threshold_response(ad_u_0_s,t_final,p,q,L_I,L_R,alpha,omega,beta,eta,gamma,N)
             times = np.ndarray.tolist(times)
             R_temp = [N-ad_sol_s[0,i]-ad_sol_s[1,i]-ad_sol_s[2,i] for i in range(len(times))]
             temp_final_sizes.append((R_temp[-1]-R_s[-1])/R_s[-1])
