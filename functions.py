@@ -42,7 +42,9 @@ def bipartite_poisson_generator(N,M,lamb1):
 # Functions for Simulation #
 ############################
 
-def adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
+def adaptive_SEIR_simulation(Graph,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
+    
+    G = Graph.copy()
     
     N = nx.number_of_nodes(G)
     
@@ -61,6 +63,14 @@ def adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
     exposed_nodes = init_exp.copy()
     recovered_nodes = []
     neighbors = []
+    
+    #Initialize network variables
+    #Get degree distributions
+    degrees = nx.degree_histogram(G)
+    
+    k = [sum([k*degrees[k]/N for k in range(len(degrees))])]
+    k2_k = [sum([k*(k-1)*degrees[k]/N for k in range(len(degrees))]) ]
+    phi = [nx.transitivity(G)]
     
     # Get all the neighbors of infected nodes
     for i in infected_nodes:
@@ -88,17 +98,19 @@ def adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
     
     while (time < t_max) and (total_rate > 0): 
         r = np.random.uniform(0,total_rate)
+        #print("At Risk == Nonzero inf neigh?",len(at_risk_nodes)==len([x for x in infectious_neighbors if x != 0]))
         #Recovery
         if r<total_recovery_rate:
             u = rand.choice(infected_nodes)
             infected_nodes = [inf for inf in infected_nodes if inf != u]
             recovered_nodes.append(u)
-            for i in list(nx.neighbors(G,u)):
+            for i in list(set(at_risk_nodes).intersection(set(nx.neighbors(G,u)))):
                 if infectious_neighbors[i] == 1:
                     infectious_neighbors[i] = 0
                     at_risk_nodes.remove(i)
                 elif infectious_neighbors[i] > 1:
                     infectious_neighbors[i] -= 1 
+            d_k, d_k2_k, d_T = [0,0,0]
         #Become Infectious
         elif total_recovery_rate <= r < total_recovery_rate+total_latency_rate:
             u = rand.choice(exposed_nodes)
@@ -110,13 +122,17 @@ def adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
                     at_risk_nodes.append(i)
                 elif i in at_risk_nodes:
                     infectious_neighbors[i] +=1
+            d_k, d_k2_k, d_T = [0,0,0]
         #Exposure
         elif total_recovery_rate+total_latency_rate <= r < total_recovery_rate+total_latency_rate+total_infection_rate:
-            probs = [beta*inf/total_infection_rate for inf in infectious_neighbors if inf != 0]
-            u = np.random.choice(sorted(at_risk_nodes),p=probs)
+            #probs = [beta*inf/total_infection_rate for inf in infectious_neighbors if inf != 0]
+            #u = np.random.choice(sorted(at_risk_nodes),p=probs)
+            probs = [beta*infectious_neighbors[at_risk_nodes[i]]/total_infection_rate for i in range(len(at_risk_nodes))]
+            u = np.random.choice(at_risk_nodes,p=probs)
             at_risk_nodes = [node for node in at_risk_nodes if node != u]
             exposed_nodes.append(u)
             infectious_neighbors[u] = 0
+            d_k, d_k2_k, d_T = [0,0,0]
         #Link Activation
         elif total_recovery_rate+total_latency_rate+total_infection_rate <= r < total_recovery_rate+total_latency_rate+total_infection_rate+total_activation_rate:
             if len(edges) == N*(N-1)/2:
@@ -124,10 +140,13 @@ def adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
             else:
                 #Get a random non-edge
                 node1,node2 = rand.choice(non_edges)
+                n1 = nx.degree(G,node1)
+                n2 = nx.degree(G,node2)
 
                 #Add the edge
                 non_edges.remove((node1,node2))
                 edges.append((node1,node2))
+                G.add_edge(node1,node2)
                 
                 if node1 in infected_nodes:
                     if node2 not in at_risk_nodes+infected_nodes+exposed_nodes+recovered_nodes:
@@ -141,6 +160,9 @@ def adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
                         infectious_neighbors[node1] = 1
                     elif node1 in at_risk_nodes:
                         infectious_neighbors[node1] += 1
+                d_k = 2/N
+                d_k2_k = 2*(n1+n2)/N
+                d_T = len(set(nx.neighbors(G,node1))&set(nx.neighbors(G,node2)))
         #Link Removal
         else:
             if len(edges) == 0:
@@ -148,10 +170,13 @@ def adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
             else:
                 #Random Edge
                 node1,node2 = rand.choice(edges)
+                n1 = nx.degree(G,node1)
+                n2 = nx.degree(G,node2)
                 
                 #Remove the edge
                 non_edges.append((node1,node2))
                 edges.remove((node1,node2))
+                G.remove_edge(node1,node2)
 
                 if node1 in at_risk_nodes and node2 in infected_nodes:
                     if infectious_neighbors[node1] == 1:
@@ -165,12 +190,20 @@ def adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
                         infectious_neighbors[node2] = 0
                     else:
                         infectious_neighbors[node2] -= 1
+                d_k = -2/N
+                d_k2_k = (4-2*(n1+n2))/N
+                d_T = -len(set(nx.neighbors(G,node1))&set(nx.neighbors(G,node2)))
+
         #Update Variable Lists
         times.append(time)
         S.append(N-len(infected_nodes+exposed_nodes+recovered_nodes))
         E.append(len(exposed_nodes))
         I.append(len(infected_nodes))
         R.append(len(recovered_nodes))
+        
+        k.append(k[-1]+d_k)
+        k2_k.append(k2_k[-1]+d_k2_k)
+        phi.append(6*(phi[-1]*N*k2_k[-2]/6+d_T)/(N*k2_k[-1]))
         
         #Update Rates
         alpha = a(time)
@@ -184,14 +217,14 @@ def adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_max):
         
         if total_rate != 0:
             time = time + np.random.exponential(1/total_rate)
-    return [times, S, E, I, R]
+    return [times, S, E, I, R, k, k2_k, phi]
 
 def ensemble(G,beta,eta,gamma,a,w,init_exp,init_inf,num_sim,t_final,t_steps,thresh,prune=True):
-    time_lists,sim_results_S, sim_results_E, sim_results_I, sim_results_R = [[],[],[],[],[]]
+    time_lists,sim_results_S, sim_results_E, sim_results_I, sim_results_R, sim_results_k, sim_results_k2_k, sim_results_phi = [[],[],[],[],[],[],[],[]]
     ep_count = 0 #successful epidemics
     run_count = 0 #Runs
     while ep_count < num_sim:
-        times, S, E, I, R = adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_final) #Simulate epidemic
+        times, S, E, I, R, k, k2_k, phi = adaptive_SEIR_simulation(G,beta,eta,gamma,a,w,init_exp,init_inf,t_final) #Simulate epidemic
         run_count += 1
         if max(I) <= thresh: #If we never reach 10 infections, or just go back down, don't record it - the code is written so I -> I+1 is the only one-step increase 
             continue
@@ -199,12 +232,15 @@ def ensemble(G,beta,eta,gamma,a,w,init_exp,init_inf,num_sim,t_final,t_steps,thre
             ep_count = ep_count + 1 #Count the epidemic
             ind = I.index(thresh) #Get the list index of the first time the infecteds exceed the threshold
             times = [t - times[ind] for t in times[ind:]] #time now starts when the threshold is attained
-            S,E,I,R = [S[ind:],E[ind:],I[ind:],R[ind:]]
+            S,E,I,R,k,k2_k,phi = [S[ind:],E[ind:],I[ind:],R[ind:],k[ind:],k2_k[ind:],phi[ind:]]
             time_lists.append(times)
             sim_results_S.append(S)
             sim_results_E.append(E)
             sim_results_I.append(I)
             sim_results_R.append(R)
+            sim_results_k.append(k)
+            sim_results_k2_k.append(k2_k)
+            sim_results_phi.append(phi)
     
     # Averaging Simulations
     # This will require averaging in some standardized time window
@@ -218,26 +254,29 @@ def ensemble(G,beta,eta,gamma,a,w,init_exp,init_inf,num_sim,t_final,t_steps,thre
     delta_t = t_final/t_steps #size of step
     times_std = [t for t in times_std if t < prune_time+delta_t] #strictly less than ensures that if prune_time is a standard time, it is the last recorded time
     
-    sim_mean_S, sim_mean_E, sim_mean_I, sim_mean_R = [[],[],[],[]] #initialize means storage
+    sim_mean_S, sim_mean_E, sim_mean_I, sim_mean_R, sim_mean_k, sim_mean_k2_k, sim_mean_phi = [[],[],[],[],[],[],[]] #initialize means storage
     
     for t in times_std: #loop over time
         temp_SEIR = [] #at time t, each sublist will be the SEIR... values from a simulation i.e. [[S_1,E_1,I_1,R_1,...],[S_2,E_2,I_2,R_2,...],...]
         for s in range(num_sim): #loop over simulations
             ind = time_lists[s].index(max(x for x in time_lists[s] if x<=t)) #this will get the index of event time just prior to the step in t_std
-            temp_SEIR.append([sim_results_S[s][ind],sim_results_E[s][ind],sim_results_I[s][ind],sim_results_R[s][ind]])
+            temp_SEIR.append([sim_results_S[s][ind],sim_results_E[s][ind],sim_results_I[s][ind],sim_results_R[s][ind],sim_results_k[s][ind],sim_results_k2_k[s][ind],sim_results_phi[s][ind]])
         #Now we average over all simulation and add to sim_mean
         sim_mean_S.append(sum([temp_SEIR[i][0] for i in range(num_sim)])/num_sim)
         sim_mean_E.append(sum([temp_SEIR[i][1] for i in range(num_sim)])/num_sim)
         sim_mean_I.append(sum([temp_SEIR[i][2] for i in range(num_sim)])/num_sim)
         sim_mean_R.append(sum([temp_SEIR[i][3] for i in range(num_sim)])/num_sim)
+        sim_mean_k.append(sum([temp_SEIR[i][4] for i in range(num_sim)])/num_sim)
+        sim_mean_k2_k.append(sum([temp_SEIR[i][5] for i in range(num_sim)])/num_sim)
+        sim_mean_phi.append(sum([temp_SEIR[i][6] for i in range(num_sim)])/num_sim)
 
     #For easier returning of information, the full results from the simulations will be a list of lists of lists
     # Level 1: time_vectors, S, E, I, R
     # Level 2: individual simulations
     # Level 3: time of individual simulation
-    full_sim_results = [time_lists, sim_results_S, sim_results_E, sim_results_I, sim_results_R]
+    full_sim_results = [time_lists, sim_results_S, sim_results_E, sim_results_I, sim_results_R, sim_results_k, sim_results_k2_k, sim_results_phi]
     
-    return [times_std, sim_mean_S, sim_mean_E, sim_mean_I, sim_mean_R, full_sim_results, run_count] 
+    return [times_std, sim_mean_S, sim_mean_E, sim_mean_I, sim_mean_R, sim_mean_k, sim_mean_k2_k, sim_mean_phi, full_sim_results, run_count] 
 
 ######################
 # Functions for ODEs #
@@ -316,6 +355,85 @@ def adSEIR_pairwise(u,t,beta,eta,gamma,a,w,N):
     
     return([dS,dE,dI,dSS,dSE,dSI,dEE,dEI,dII,dk,dk2_k,dphi])
 
+def adSEIR_pairwise_simp(u,t,beta,eta,gamma,a,w,N):
+    [S,E,I,SS,SE,SI,EE,EI,II,k,k2_k,phi] = u
+    
+    #Time Dependent activation/deletion rates - must pass functions
+    alpha = a(t)
+    omega = w(t)
+
+    #Network Parameter in the triple closure
+    K = (k-1)/k
+    
+    #Triple Closure
+    if I == 0:
+        SSI = 0
+        ESI = 0
+        ISI = 0
+    elif I != 0 and E == 0:
+        SSI = K*(SS*SI/S)*(1-phi+phi*(N/k)*SI/(S*I))
+        ESI = 0
+        ISI = K*((SI**2)/S)*(1-phi+phi*(N/k)*II/(I**2))    
+    else:
+        SSI = K*(SS*SI/S)*(1-phi+phi*(N/k)*SI/(S*I))
+        ESI = K*(SE*SI/S)*(1-phi+phi*(N/k)*EI/(E*I))
+        ISI = K*((SI**2)/S)*(1-phi+phi*(N/k)*II/(I**2))
+    
+    #Differential Equations
+    dS = -beta*SI
+    dE = beta*SI-eta*E
+    dI = eta*E-gamma*I
+    dSS = -2*beta*SSI +alpha*(S*(S-1)-SS)-omega*SS
+    dSE = -eta*SE+beta*(SSI-ESI)+alpha*(S*E-SE)-omega*SE
+    dSI = eta*SE-gamma*SI-beta*SI-beta*ISI+alpha*(S*I-SI)-omega*SI
+    dEE = -2*eta*EE+2*beta*ESI+alpha*(E*(E-1)-EE)-omega*EE
+    dEI = eta*EE-(gamma+eta)*EI+beta*SI+beta*ESI+alpha*(E*I-EI)-omega*EI
+    dII = 2*eta*EI-2*gamma*II+alpha*(I*(I-1)-II)-omega*II
+    dk = alpha*(N-1)-(alpha+omega)*k
+    dk2_k = 2*alpha*(N-2)*k-2*(alpha+omega)*k2_k
+    dphi = 3*alpha-(alpha+omega)*phi-2*alpha*(N-2)*(k/k2_k)*phi
+    
+    return([dS,dE,dI,dSS,dSE,dSI,dEE,dEI,dII,dk,dk2_k,dphi])
+
+def adSEIR_pairwise_noclust(u,t,beta,eta,gamma,a,w,N):
+    [S,E,I,SS,SE,SI,EE,EI,II,k,k2_k] = u
+    
+    #Time Dependent activation/deletion rates - must pass functions
+    alpha = a(t)
+    omega = w(t)
+
+    #Network Parameter in the triple closure
+    K = (k2_k)/k**2
+    
+    #Triple Closure
+    if I == 0:
+        SSI = 0
+        ESI = 0
+        ISI = 0
+    elif I != 0 and E == 0:
+        SSI = K*(SS*SI/S)
+        ESI = 0
+        ISI = K*((SI**2)/S)    
+    else:
+        SSI = K*(SS*SI/S)
+        ESI = K*(SE*SI/S)
+        ISI = K*((SI**2)/S)
+    
+    #Differential Equations
+    dS = -beta*SI
+    dE = beta*SI-eta*E
+    dI = eta*E-gamma*I
+    dSS = -2*beta*SSI +alpha*(S*(S-1)-SS)-omega*SS
+    dSE = -eta*SE+beta*(SSI-ESI)+alpha*(S*E-SE)-omega*SE
+    dSI = eta*SE-gamma*SI-beta*SI-beta*ISI+alpha*(S*I-SI)-omega*SI
+    dEE = -2*eta*EE+2*beta*ESI+alpha*(E*(E-1)-EE)-omega*EE
+    dEI = eta*EE-(gamma+eta)*EI+beta*SI+beta*ESI+alpha*(E*I-EI)-omega*EI
+    dII = 2*eta*EI-2*gamma*II+alpha*(I*(I-1)-II)-omega*II
+    dk = alpha*(N-1)-(alpha+omega)*k
+    dk2_k = 2*alpha*(N-2)*k-2*(alpha+omega)*k2_k
+    
+    return([dS,dE,dI,dSS,dSE,dSI,dEE,dEI,dII,dk,dk2_k])
+
 def adSEIR_pairwise_ivp(t,u,beta,eta,gamma,a,w,N):
     [S,E,I,SS,SE,SI,EE,EI,II,k,k2_k,phi] = u
     
@@ -355,6 +473,7 @@ def adSEIR_pairwise_ivp(t,u,beta,eta,gamma,a,w,N):
     dphi = 3*alpha-(alpha+omega)*phi-2*alpha*(N-2)*(k/k2_k)*phi
     
     return([dS,dE,dI,dSS,dSE,dSI,dEE,dEI,dII,dk,dk2_k,dphi])
+
 
 ########################
 # Evaluation Functions #                                          
